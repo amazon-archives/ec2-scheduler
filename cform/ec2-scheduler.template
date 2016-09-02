@@ -1,0 +1,483 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "(SO0002) - EC2 Scheduler: This template installs an opt-in version of the EC2 Scheduler for automatically starting and stopping EC2 instances.",
+    "Parameters": {
+        "Schedule": {
+            "Description": "Schedule for CWE Scheduled Expression (e.g. rate([5 minutes|1 hour|1 day]) or cron(0 17 ? * MON-FRI *))",
+            "Type": "String",
+            "Default": "rate(5 minutes)"
+        },
+        "DefaultStartTime": {
+            "Description": "Default Start Time (UTC, 24-hour format)",
+            "Type": "String",
+            "Default": "0800"
+        },
+        "DefaultStopTime": {
+            "Description": "Default Start Time (UTC, 24-hour format)",
+            "Type": "String",
+            "Default": "1800"
+        },
+        "DefaultDaysActive": {
+            "Description": "Enter 'all', 'weekdays', or any combination of days ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', or 'sun') comma separated",
+            "Type": "String",
+            "Default": "all"
+        },
+        "CustomTagName": {
+            "Description": "Custom Tag Name",
+            "Type": "String",
+            "Default": "scheduler:ec2-startstop"
+        },
+        "DynamoDBTableName": {
+            "Description": "DynamoDB Table Name",
+            "Type": "String",
+            "Default": "EC2-Scheduler"
+        },
+        "ReadCapacityUnits": {
+            "ConstraintDescription": "should be between 5 and 10000",
+            "Default": "1",
+            "Description": "Provisioned read throughput",
+            "MaxValue": "10000",
+            "MinValue": "1",
+            "Type": "Number"
+        },
+        "WriteCapacityUnits": {
+            "ConstraintDescription": "should be between 5 and 10000",
+            "Default": "1",
+            "Description": "Provisioned write throughput",
+            "MaxValue": "10000",
+            "MinValue": "1",
+            "Type": "Number"
+        },
+        "SendAnonymousData": {
+            "Description": "Send anonymous data to AWS",
+            "Type": "String",
+            "Default": "Yes",
+            "AllowedValues": [
+                "Yes",
+                "No"
+            ]
+        },
+        "CloudWatchMetrics": {
+            "Description": "Create CloudWatch Custom Metric",
+            "Type": "String",
+            "Default": "Enabled",
+            "AllowedValues": [
+                "Enabled",
+                "Disabled"
+            ]
+        }
+    },
+    "Metadata": {
+        "AWS::CloudFormation::Interface": {
+            "ParameterGroups": [
+                {
+                    "Label": {
+                        "default": "Tag Configuration"
+                    },
+                    "Parameters": [
+                        "CustomTagName"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "CloudWatch Event Schedule Configuration"
+                    },
+                    "Parameters": [
+                        "Schedule"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "Default Value Configuration"
+                    },
+                    "Parameters": [
+                        "DefaultStartTime",
+                        "DefaultStopTime",
+                        "DefaultDaysActive"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "DynamoDB Configuration"
+                    },
+                    "Parameters": [
+                        "DynamoDBTableName",
+                        "ReadCapacityUnits",
+                        "WriteCapacityUnits"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "CloudWatch Custom Metric"
+                    },
+                    "Parameters": [
+                        "CloudWatchMetrics"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "Anonymous Metrics Request"
+                    },
+                    "Parameters": [
+                        "SendAnonymousData"
+                    ]
+                }
+            ]
+        }
+    },
+    "Resources": {
+        "ec2SchedulerRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "ec2SchedulerPermissions",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:PutLogEvents"
+                                    ],
+                                    "Resource": "arn:aws:logs:*:*:log-group:/aws/lambda/*"
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "dynamodb:GetItem"
+                                    ],
+                                    "Resource": [
+                                        "arn:aws:dynamodb:*:*:table/*"
+                                    ]
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "ec2:StartInstances",
+                                        "ec2:StopInstances",
+                                        "ec2:DescribeRegions",
+                                        "ec2:DescribeInstances",
+                                        "cloudwatch:PutMetricData",
+                                        "cloudformation:DescribeStacks"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "ec2SchedulerOptIn": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Handler": "ec2-scheduler.lambda_handler",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "ec2SchedulerRole",
+                        "Arn"
+                    ]
+                },
+                "Description": "EC2 Scheduler Lambda function for automatically starting and stopping EC2 instances.",
+                "Code": {
+                    "S3Bucket": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "solutions-",
+                                {
+                                    "Ref": "AWS::Region"
+                                }
+                            ]
+                        ]
+                    },
+                    "S3Key": "ec2-scheduler/v1/ec2-scheduler.zip"
+                },
+                "Runtime": "python2.7",
+                "Timeout": "300"
+            }
+        },
+        "CreateParamDDB": {
+            "Properties": {
+                "AttributeDefinitions": [
+                    {
+                        "AttributeName": "SolutionName",
+                        "AttributeType": "S"
+                    }
+                ],
+                "KeySchema": [
+                    {
+                        "AttributeName": "SolutionName",
+                        "KeyType": "HASH"
+                    }
+                ],
+                "ProvisionedThroughput": {
+                    "ReadCapacityUnits": {
+                        "Ref": "ReadCapacityUnits"
+                    },
+                    "WriteCapacityUnits": {
+                        "Ref": "WriteCapacityUnits"
+                    }
+                },
+                "TableName": {
+                    "Ref": "DynamoDBTableName"
+                }
+            },
+            "Type": "AWS::DynamoDB::Table"
+        },
+        "SolutionHelperRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "Solution_Helper_Permissions",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:PutLogEvents"
+                                    ],
+                                    "Resource": "arn:aws:logs:*:*:log-group:/aws/lambda/*"
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "dynamodb:PutItem"
+                                    ],
+                                    "Resource": [
+                                        "arn:aws:dynamodb:*:*:table/*"
+                                    ]
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "lambda:AddPermission",
+                                        "lambda:CreateFunction",
+                                        "lambda:DeleteFunction",
+                                        "lambda:GetFunction",
+                                        "lambda:UpdateFunctionCode",
+                                        "lambda:UpdateFunctionConfiguration",
+                                        "s3:GetObject",
+                                        "events:DeleteRule",
+                                        "events:DisableRule",
+                                        "events:EnableRule",
+                                        "events:PutEvents",
+                                        "events:PutRule",
+                                        "events:PutTargets",
+                                        "events:RemoveTargets",
+                                        "events:ListTargetsByRule",
+                                        "iam:PassRole"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "SolutionHelper": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Handler": "solution-helper.lambda_handler",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "SolutionHelperRole",
+                        "Arn"
+                    ]
+                },
+                "Description": "This function creates a CloudFormation custom lambda resource that writes parameters into DynamoDB table.",
+                "Code": {
+                    "S3Bucket": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "solutions-builder-",
+                                {
+                                    "Ref": "AWS::Region"
+                                }
+                            ]
+                        ]
+                    },
+                    "S3Key": "library/solution-helper/v1/solution-helper.zip"
+                },
+                "Runtime": "python2.7",
+                "Timeout": "120"
+            }
+        },
+        "PutDdbData": {
+            "Type": "Custom::PutDDBData",
+            "Properties": {
+                "ServiceToken": {
+                    "Fn::GetAtt": [
+                        "SolutionHelper",
+                        "Arn"
+                    ]
+                },
+                "StoreInDDB": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "{ 'TableName' : '",
+                            {
+                                "Ref": "CreateParamDDB"
+                            },
+                            "', ",
+                            "'Item': {",
+                            "'CustomTagName': {'S': '",
+                            {
+                                "Ref": "CustomTagName"
+                            },
+                            "'},",
+                            "'SolutionName': {'S': 'EC2Scheduler'},",
+                            "'DefaultStartTime': {'S': '",
+                            {
+                                "Ref": "DefaultStartTime"
+                            },
+                            "'},",
+                            "'DefaultStopTime': {'S': '",
+                            {
+                                "Ref": "DefaultStopTime"
+                            },
+                            "'},",
+                            "'SendAnonymousData': {'S': '",
+                            {
+                                "Ref": "SendAnonymousData"
+                            },
+                            "'},",
+                            "'CloudWatchMetrics': {'S': '",
+                            {
+                                "Ref": "CloudWatchMetrics"
+                            },
+                            "'},",
+                            "'UUID': {'S': '",
+                            {
+                                "Fn::GetAtt": [
+                                    "CreateUniqueID",
+                                    "UUID"
+                                ]
+                            },
+                            "'},",
+                            "'DefaultDaysActive': {'S': '",
+                            {
+                                "Ref": "DefaultDaysActive"
+                            },
+                            "'}",
+                            "}",
+                            "}"
+                        ]
+                    ]
+                },
+                "DependsOn": [
+                    "CreateUniqueID",
+                    "CreateParamDDB"
+                ]
+            }
+        },
+        "CreateUniqueID": {
+            "Type": "Custom::CreateUUID",
+            "Properties": {
+                "ServiceToken": {
+                    "Fn::GetAtt": [
+                        "SolutionHelper",
+                        "Arn"
+                    ]
+                },
+                "Region": {
+                    "Ref": "AWS::Region"
+                },
+                "CreateUniqueID": "true",
+                "DependsOn": [
+                    "SolutionHelper"
+                ]
+            }
+        },
+        "ScheduledRule": {
+            "Type": "AWS::Events::Rule",
+            "Properties": {
+                "Description": "Rule to trigger EC2Scheduler function on a schedule",
+                "ScheduleExpression": {
+                    "Ref": "Schedule"
+                },
+                "State": "ENABLED",
+                "Targets": [
+                    {
+                        "Arn": {
+                            "Fn::GetAtt": [
+                                "ec2SchedulerOptIn",
+                                "Arn"
+                            ]
+                        },
+                        "Id": "TargetFunctionV1"
+                    }
+                ]
+            }
+        },
+        "PermissionForEventsToInvokeLambda": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "FunctionName": {
+                    "Ref": "ec2SchedulerOptIn"
+                },
+                "Action": "lambda:InvokeFunction",
+                "Principal": "events.amazonaws.com",
+                "SourceArn": {
+                    "Fn::GetAtt": [
+                        "ScheduledRule",
+                        "Arn"
+                    ]
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "UUID": {
+            "Description": "Newly created random UUID.",
+            "Value": {
+                "Fn::GetAtt": [
+                    "CreateUniqueID",
+                    "UUID"
+                ]
+            }
+        },
+        "DDBTableName": {
+            "Description": "DynamoDB Table Name",
+            "Value": {
+                "Ref": "CreateParamDDB"
+            }
+        }
+    }
+}
