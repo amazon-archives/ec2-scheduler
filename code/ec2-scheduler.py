@@ -90,7 +90,7 @@ def lambda_handler(event, context):
 
             awsregion = region['RegionName']
             now = datetime.datetime.now().strftime("%H%M")
-            nowMax = datetime.datetime.now() - datetime.timedelta(minutes=45)
+            nowMax = datetime.datetime.now() - datetime.timedelta(minutes=59)
             nowMax = nowMax.strftime("%H%M")
             nowDay = datetime.datetime.today().strftime("%a").lower()
 
@@ -106,78 +106,78 @@ def lambda_handler(event, context):
             print "Creating", region['RegionName'], "instance lists..."
 
             for i in instances:
+                if i.tags != None:
+                    for t in i.tags:
+                        if t['Key'][:customTagLen] == customTagName:
 
-                for t in i.tags:
-                    if t['Key'][:customTagLen] == customTagName:
+                            ptag = t['Value'].split(";")
 
-                        ptag = t['Value'].split(";")
+                            # Split out Tag & Set Variables to default
+                            default1 = 'default'
+                            default2 = 'true'
+                            startTime = defaultStartTime
+                            stopTime = defaultStopTime
+                            timeZone = defaultTimeZone
+                            daysActive = defaultDaysActive
+                            state = i.state['Name']
+                            itype = i.instance_type
 
-                        # Split out Tag & Set Variables to default
-                        default1 = 'default'
-                        default2 = 'true'
-                        startTime = defaultStartTime
-                        stopTime = defaultStopTime
-                        timeZone = defaultTimeZone
-                        daysActive = defaultDaysActive
-                        state = i.state['Name']
-                        itype = i.instance_type
+                            # Post current state of the instances
+                            if createMetrics == 'enabled':
+                                if state == "running":
+                                    putCloudWatchMetric(region['RegionName'], i.instance_id, 1)
+                                if state == "stopped":
+                                    putCloudWatchMetric(region['RegionName'], i.instance_id, 0)
 
-                        # Post current state of the instances
-                        if createMetrics == 'enabled':
-                            if state == "running":
-                                putCloudWatchMetric(region['RegionName'], i.instance_id, 1)
-                            if state == "stopped":
-                                putCloudWatchMetric(region['RegionName'], i.instance_id, 0)
+                            # Parse tag-value
+                            if len(ptag) >= 1:
+                                if ptag[0].lower() in (default1, default2):
+                                    startTime = defaultStartTime
+                                else:
+                                    startTime = ptag[0]
+                                    stopTime = ptag[0]
+                            if len(ptag) >= 2:
+                                stopTime = ptag[1]
+                            if len(ptag) >= 3:
+                                timeZone = ptag[2].lower()
+                            if len(ptag) >= 4:
+                                daysActive = ptag[3].lower()
 
-                        # Parse tag-value
-                        if len(ptag) >= 1:
-                            if ptag[0].lower() in (default1, default2):
-                                startTime = defaultStartTime
-                            else:
-                                startTime = ptag[0]
-                                stopTime = ptag[0]
-                        if len(ptag) >= 2:
-                            stopTime = ptag[1]
-                        if len(ptag) >= 3:
-                            timeZone = ptag[2].lower()
-                        if len(ptag) >= 4:
-                            daysActive = ptag[3].lower()
+                            isActiveDay = False
 
-                        isActiveDay = False
-
-                        # Days Interpreter
-                        if daysActive == "all":
-                            isActiveDay = True
-                        elif daysActive == "weekdays":
-                            weekdays = ['mon', 'tue', 'wed', 'thu', 'fri']
-                            if (nowDay in weekdays):
+                            # Days Interpreter
+                            if daysActive == "all":
                                 isActiveDay = True
-                        else:
-                            daysActive = daysActive.split(",")
-                            for d in daysActive:
-                                if d.lower() == nowDay:
+                            elif daysActive == "weekdays":
+                                weekdays = ['mon', 'tue', 'wed', 'thu', 'fri']
+                                if (nowDay in weekdays):
                                     isActiveDay = True
+                            else:
+                                daysActive = daysActive.split(",")
+                                for d in daysActive:
+                                    if d.lower() == nowDay:
+                                        isActiveDay = True
 
-                        # Append to start list
-                        if startTime >= str(nowMax) and startTime <= str(now) and \
-                                isActiveDay == True and state == "stopped":
-                            startList.append(i.instance_id)
-                            print i.instance_id, " added to START list"
-                            if createMetrics == 'enabled':
-                                putCloudWatchMetric(region['RegionName'], i.instance_id, 1)
+                            # Append to start list
+                            if startTime >= str(nowMax) and startTime <= str(now) and \
+                                    isActiveDay == True and state == "stopped":
+                                startList.append(i.instance_id)
+                                print i.instance_id, " added to START list"
+                                if createMetrics == 'enabled':
+                                    putCloudWatchMetric(region['RegionName'], i.instance_id, 1)
 
-                        # Append to stop list
-                        if stopTime >= str(nowMax) and stopTime <= str(now) and \
-                                isActiveDay == True and state == "running":
-                            stopList.append(i.instance_id)
-                            print i.instance_id, " added to STOP list"
-                            if createMetrics == 'enabled':
-                                putCloudWatchMetric(region['RegionName'], i.instance_id, 0)
+                            # Append to stop list
+                            if stopTime >= str(nowMax) and stopTime <= str(now) and \
+                                    isActiveDay == True and state == "running":
+                                stopList.append(i.instance_id)
+                                print i.instance_id, " added to STOP list"
+                                if createMetrics == 'enabled':
+                                    putCloudWatchMetric(region['RegionName'], i.instance_id, 0)
 
-                        if state == 'running':
-                            runningStateList.append(itype)
-                        if state == 'stopped':
-                            stoppedStateList.append(itype)
+                            if state == 'running':
+                                runningStateList.append(itype)
+                            if state == 'stopped':
+                                stoppedStateList.append(itype)
 
             # Execute Start and Stop Commands
             if startList:
