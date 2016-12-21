@@ -16,6 +16,7 @@ import boto3
 import datetime
 import json
 from urllib2 import Request
+from urllib2 import urlopen
 from collections import Counter
 
 def putCloudWatchMetric(region, instance_id, instance_state):
@@ -238,4 +239,8 @@ def lambda_handler(event, context):
         data=json.dumps(postDict)
         headers = {'content-type': 'application/json'}
         req = Request(url, data, headers)
+        rsp = urlopen(req)
+        content = rsp.read()
+        rsp_code = rsp.getcode()
+        print ('Response Code: {}'.format(rsp_code))
 
