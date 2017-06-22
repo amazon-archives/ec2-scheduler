@@ -191,6 +191,7 @@
                                         "ec2:StopInstances",
                                         "ec2:DescribeRegions",
                                         "ec2:DescribeInstances",
+                                        "kms:CreateGrant",
                                         "cloudwatch:PutMetricData",
                                         "cloudformation:DescribeStacks"
                                     ],
